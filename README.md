@@ -120,6 +120,57 @@ API Gateway (HTTP API or REST API) or ALB in front of it.
 > Lambda to the appropriate VPC/subnets and security groups. Otherwise ensure
 > your Atlas IP access list allows the Lambda's egress (e.g. via a NAT gateway).
 
+## CI/CD (GitHub Actions)
+
+Automated deploys are configured via GitHub Actions in `.github/workflows/`:
+
+| Workflow            | Trigger            | Env source                        | Alias updated |
+|---------------------|--------------------|-----------------------------------|---------------|
+| `deploy-dev.yml`    | push to `dev`      | `DEV_MONGODB_URI` + `JWT_SECRET`  | `dev`         |
+| `deploy-prod.yml`   | push to `main`     | `PROD_MONGODB_URI` + `JWT_SECRET` | `prod`        |
+
+Each workflow performs the same pipeline:
+
+1. Checkout code and set up Node.js 20.
+2. `npm install --production` and zip the package (excluding `.git/` and `.github/`).
+3. Configure AWS credentials.
+4. `aws lambda update-function-code` — upload the new code, then wait for the
+   update to finish.
+5. **Set environment variables → wait → publish.** The workflow runs
+   `aws lambda update-function-configuration` to set the correct env vars, waits
+   for the config update to complete, and only *then* publishes a new version.
+   This ordering matters: publishing snapshots `$LATEST`, so env vars must be set
+   **before** `publish-version` — otherwise they would stay on `$LATEST` and the
+   published version would capture stale/missing values.
+6. `aws lambda publish-version` and point the environment's alias
+   (`dev` or `prod`) at the newly published version.
+
+> Because dev and prod use different databases, `MONGODB_URI` is set per
+> environment (`DEV_MONGODB_URI` / `PROD_MONGODB_URI`) at deploy time rather than
+> managed manually on the function.
+
+### Required GitHub Actions secrets
+
+Add these under **Settings → Secrets and variables → Actions** in the backend repo:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `JWT_SECRET`
+- `DEV_MONGODB_URI`
+- `PROD_MONGODB_URI`
+
+### AWS prerequisites
+
+- A Lambda function named `expensetracker` with handler `lambda.handler`.
+- Two aliases already created on that function: `dev` and `prod`.
+- The IAM user behind the AWS credentials needs: `lambda:UpdateFunctionCode`,
+  `lambda:UpdateFunctionConfiguration`, `lambda:PublishVersion`,
+  `lambda:UpdateAlias`, and `lambda:GetFunction`.
+
+> Heads up: pushing to `main` triggers the **prod** deploy immediately. Use the
+> `dev` branch for testing before merging to `main`.
+
 ## Notes
 
 - Secrets are read only from environment variables — nothing is hardcoded.
