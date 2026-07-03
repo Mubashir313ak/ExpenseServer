@@ -25,6 +25,19 @@ app.disable('x-powered-by');
 app.use(cors()); // allow all origins for now
 app.use(express.json({ limit: '1mb' }));
 
+// Deploy/alias smoke-test route. Deliberately placed BEFORE the DB middleware so
+// it responds even if MongoDB is unreachable — useful for confirming that a
+// dev/prod deployment and its API Gateway alias are wired up correctly.
+app.get('/api/ping', (_req, res) => {
+  res.json({
+    message: 'pong',
+    environment: process.env.NODE_ENV || 'development',
+    region: process.env.AWS_REGION || null,
+    lambdaVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION || null,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Ensure a live DB connection before any route runs. On Lambda warm starts the
 // cached connection is reused, so this is effectively free after the first hit.
 app.use(
